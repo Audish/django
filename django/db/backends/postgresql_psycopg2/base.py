@@ -15,6 +15,7 @@ from django.db.backends.postgresql.creation import DatabaseCreation
 from django.db.backends.postgresql.version import get_version
 from django.db.backends.postgresql_psycopg2.introspection import DatabaseIntrospection
 from django.utils.safestring import SafeUnicode, SafeString
+from django.utils.log import getLogger
 
 try:
     import psycopg2 as Database
@@ -29,6 +30,8 @@ IntegrityError = Database.IntegrityError
 psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
 psycopg2.extensions.register_adapter(SafeString, psycopg2.extensions.QuotedString)
 psycopg2.extensions.register_adapter(SafeUnicode, psycopg2.extensions.QuotedString)
+
+logger = getLogger('django.db.backends')
 
 class CursorWrapper(object):
     """
@@ -112,6 +115,24 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         self.creation = DatabaseCreation(self)
         self.introspection = DatabaseIntrospection(self)
         self.validation = BaseDatabaseValidation(self)
+
+    def close(self):
+        if self.connection is None:
+            return
+
+        try:
+            self.connection.close()
+            self.connection = None
+        except psycopg2.Error:
+            # In some cases (database restart, network connection lost etc...)
+            # the connection to the database is lost without giving Django a
+            # notification. If we don't set self.connection to None, the error
+            # will occur a every request.
+            self.connection = None
+            logger.warning('psycopg2 error while closing the connection.',
+                exc_info=sys.exc_info()
+            )
+            raise
 
     def _cursor(self):
         new_connection = False
